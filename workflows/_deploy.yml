@@ -1,0 +1,67 @@
+name: _deploy (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      image_tag:
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # GitHub Environments carry per-env variables (AWS_ROLE_ARN_DEPLOY, EKS_CLUSTER, ...)
+    # and, for "prod", Required reviewers = the manual approval gate.
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_DEPLOY }} # per-env role, namespace-scoped via EKS access entry
+          aws-region: ap-south-1
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER }}" --region ap-south-1
+
+      - name: Record current revision (for rollback)
+        id: prev
+        run: |
+          REV=$(helm history inventory -n orders -o json 2>/dev/null | jq -r 'map(select(.status=="deployed"))|last|.revision // "none"')
+          echo "revision=$REV" >> "$GITHUB_OUTPUT"
+          echo "Previous deployed revision: $REV"
+
+      - name: Deploy with Helm (atomic)
+        id: helm
+        run: |
+          helm upgrade --install inventory deploy/helm/inventory \
+            --namespace orders --create-namespace \
+            -f deploy/helm/inventory/values-${{ inputs.environment }}.yaml \
+            --set image.repository="${{ vars.ECR_REGISTRY }}/finnova/inventory" \
+            --set image.tag="${{ inputs.image_tag }}" \
+            --set serviceAccount.roleArn="${{ vars.INVENTORY_IRSA_ROLE_ARN }}" \
+            --atomic --wait --timeout 5m \
+            --history-max 10
+        # --atomic: if the new pods never become Ready (probes fail), Helm
+        # automatically rolls back to the previous revision. No manual action needed.
+
+      - name: Smoke test
+        run: |
+          kubectl -n orders rollout status deploy/inventory --timeout=120s
+          kubectl -n orders run smoke-${{ github.run_id }} --rm -i --restart=Never \
+            --image=curlimages/curl:8.10.1 -- \
+            curl -fsS --max-time 5 http://inventory.orders.svc.cluster.local/readyz
+
+      # Belt and braces: if the smoke test fails after a successful helm upgrade, roll back explicitly.
+      - name: Roll back on failed smoke test
+        if: failure() && steps.helm.outcome == 'success'
+        run: |
+          echo "::error::Smoke test failed, rolling back to revision ${{ steps.prev.outputs.revision }}"
+          helm rollback inventory -n orders --wait --timeout 5m

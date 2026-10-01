@@ -1,0 +1,17 @@
+{
+  "name": "inventory-service",
+  "version": "1.0.0",
+  "description": "FinNova inventory microservice (PoC skeleton for the migration assessment)",
+  "main": "src/server.js",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "lint": "node --check src/server.js && node --check src/config.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

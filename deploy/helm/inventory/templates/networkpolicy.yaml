@@ -1,0 +1,42 @@
+{{- if .Values.networkPolicy.enabled }}
+# Default deny for this workload, then allow only required flows.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "inventory.name" . }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "inventory.selectorLabels" . | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.ingressFromNamespaceLabels | nindent 14 }}
+      ports:
+        - port: {{ .Values.containerPort }}
+          protocol: TCP
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    # MySQL in the data subnets
+    {{- if .Values.networkPolicy.dbCidrs }}
+    - to:
+        {{- range .Values.networkPolicy.dbCidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - { port: 3306, protocol: TCP }
+    {{- end }}
+    # AWS APIs (STS for IRSA, Secrets Manager) over HTTPS
+    - ports:
+        - { port: 443, protocol: TCP }
+{{- end }}

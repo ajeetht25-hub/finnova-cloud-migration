@@ -1,0 +1,82 @@
+replicaCount: 2 # initial; HPA takes over when enabled
+
+image:
+  repository: "" # set by pipeline: <account>.dkr.ecr.<region>.amazonaws.com/finnova/inventory
+  tag: ""        # set by pipeline to the immutable git SHA tag
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  name: inventory
+  # IRSA role that can read ONLY this service's secret (from terraform output service_irsa_role_arns)
+  roleArn: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+containerPort: 8080
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+  startup:
+    path: /healthz
+    periodSeconds: 3
+    failureThreshold: 20
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 65
+  targetMemoryUtilizationPercentage: 75
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Rolling update tuned for zero downtime
+strategy:
+  maxSurge: 25%
+  maxUnavailable: 0
+
+terminationGracePeriodSeconds: 30
+
+# Secrets Manager -> file via Secrets Store CSI driver + AWS provider (ASCP)
+secrets:
+  # Secrets Manager secret name for this service/env, e.g. finnova-prod/inventory/db
+  secretName: ""
+  mountPath: /mnt/secrets
+  fileName: db
+
+# NetworkPolicy: default deny, then allow only what is needed
+networkPolicy:
+  enabled: true
+  ingressFromNamespaceLabels:
+    kubernetes.io/metadata.name: orders   # order service + ingress controller namespace
+  dbCidrs: []        # set per env to the data-subnet CIDRs (port 3306)
+
+nodeSelector:
+  workload: general
+
+env:
+  LOG_LEVEL: info

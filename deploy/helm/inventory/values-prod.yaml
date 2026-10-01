@@ -1,0 +1,12 @@
+autoscaling:
+  minReplicas: 3
+  maxReplicas: 12
+podDisruptionBudget:
+  minAvailable: 2
+secrets:
+  secretName: finnova-prod/inventory/db
+networkPolicy:
+  dbCidrs: ["10.30.192.0/20", "10.30.208.0/20", "10.30.224.0/20"]
+resources:
+  requests: { cpu: 200m, memory: 192Mi }
+  limits: { cpu: "1", memory: 384Mi }

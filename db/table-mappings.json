@@ -1,0 +1,43 @@
+{
+  "rules": [
+    {
+      "rule-type": "selection",
+      "rule-id": "1",
+      "rule-name": "orders-schema",
+      "object-locator": { "schema-name": "orders", "table-name": "%" },
+      "rule-action": "include"
+    },
+    {
+      "rule-type": "selection",
+      "rule-id": "2",
+      "rule-name": "inventory-schema",
+      "object-locator": { "schema-name": "inventory", "table-name": "%" },
+      "rule-action": "include"
+    },
+    {
+      "rule-type": "selection",
+      "rule-id": "3",
+      "rule-name": "payment-schema",
+      "object-locator": { "schema-name": "payment", "table-name": "%" },
+      "rule-action": "include"
+    },
+    {
+      "rule-type": "selection",
+      "rule-id": "4",
+      "rule-name": "exclude-temp-and-session-tables",
+      "object-locator": { "schema-name": "%", "table-name": "tmp\\_%" },
+      "rule-action": "exclude"
+    },
+    {
+      "rule-type": "table-settings",
+      "rule-id": "5",
+      "rule-name": "parallel-load-large-orders-table",
+      "object-locator": { "schema-name": "orders", "table-name": "order_items" },
+      "parallel-load": {
+        "type": "ranges",
+        "columns": ["id"],
+        "boundaries": [["50000000"], ["100000000"], ["150000000"], ["200000000"]]
+      }
+    }
+  ]
+}

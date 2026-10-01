@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 820" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="1200" height="820" fill="#ffffff"/>
+  <text x="600" y="28" text-anchor="middle" font-size="20" font-weight="bold" fill="#1b2a41">FinNova Order Management – Target State on AWS (ap-south-1, prod)</text>
+
+  <!-- On-prem source -->
+  <rect x="20" y="70" width="190" height="300" rx="8" fill="#f1f1f1" stroke="#777"/>
+  <text x="115" y="94" text-anchor="middle" font-weight="bold">Source: on-prem VMware</text>
+  <rect x="35" y="110" width="160" height="42" rx="5" fill="#fff" stroke="#999"/><text x="115" y="136" text-anchor="middle">Nginx LB + 2 app VMs</text>
+  <rect x="35" y="165" width="160" height="42" rx="5" fill="#fff" stroke="#999"/><text x="115" y="191" text-anchor="middle">MySQL 5.7 (800 GB)</text>
+  <rect x="35" y="220" width="160" height="42" rx="5" fill="#fff" stroke="#999"/><text x="115" y="246" text-anchor="middle">NFS 2 TB</text>
+  <rect x="35" y="275" width="160" height="42" rx="5" fill="#fff" stroke="#999"/><text x="115" y="301" text-anchor="middle">cron batch jobs</text>
+  <text x="115" y="345" text-anchor="middle" fill="#a33" font-size="12">static config, plaintext creds</text>
+
+  <!-- Users -->
+  <circle cx="330" cy="70" r="0"/>
+  <rect x="380" y="46" width="130" height="30" rx="15" fill="#1b2a41"/><text x="445" y="66" text-anchor="middle" fill="#fff">Internet users</text>
+  <text x="560" y="66" fill="#555">WAF + ACM TLS 1.2+</text>
+
+  <!-- VPC -->
+  <rect x="250" y="95" width="930" height="610" rx="10" fill="#f7fbff" stroke="#2b6cb0" stroke-width="2"/>
+  <text x="265" y="116" font-weight="bold" fill="#2b6cb0">VPC 10.30.0.0/16 (3 AZs)</text>
+
+  <!-- Public -->
+  <rect x="270" y="130" width="890" height="100" rx="8" fill="#e8f5e9" stroke="#2e7d32"/>
+  <text x="285" y="150" font-weight="bold" fill="#2e7d32">Public subnets</text>
+  <rect x="300" y="165" width="150" height="45" rx="5" fill="#fff" stroke="#2e7d32"/><text x="375" y="185" text-anchor="middle">ALB :443</text><text x="375" y="202" text-anchor="middle" font-size="11" fill="#555">SG: internet → 443</text>
+  <rect x="500" y="165" width="150" height="45" rx="5" fill="#fff" stroke="#2e7d32"/><text x="575" y="192" text-anchor="middle">NAT GW (per AZ)</text>
+  <rect x="700" y="165" width="150" height="45" rx="5" fill="#fff" stroke="#2e7d32"/><text x="775" y="192" text-anchor="middle">Internet Gateway</text>
+
+  <!-- App -->
+  <rect x="270" y="250" width="540" height="150" rx="8" fill="#fff8e1" stroke="#f9a825"/>
+  <text x="285" y="270" font-weight="bold" fill="#8d6e00">Private app subnets – EKS node groups</text>
+  <rect x="290" y="285" width="240" height="95" rx="5" fill="#fff" stroke="#f9a825"/>
+  <text x="410" y="305" text-anchor="middle" font-weight="bold">Node group "batch" (Spot)</text>
+  <text x="410" y="325" text-anchor="middle">nightly report CronJobs</text>
+  <text x="410" y="343" text-anchor="middle" font-size="11" fill="#555">tainted workload=batch</text>
+  <rect x="550" y="285" width="240" height="95" rx="5" fill="#fff" stroke="#f9a825"/>
+  <text x="670" y="305" text-anchor="middle" font-weight="bold">Node group "app" (on-demand)</text>
+  <text x="670" y="325" text-anchor="middle">web · order · inventory</text>
+  <text x="670" y="343" text-anchor="middle" font-size="11" fill="#555">HPA, PDB, NetworkPolicy</text>
+  <text x="670" y="360" text-anchor="middle" font-size="11" fill="#555">IRSA per service</text>
+
+  <!-- PCI -->
+  <rect x="830" y="250" width="330" height="150" rx="8" fill="#fdecea" stroke="#c62828" stroke-width="2"/>
+  <text x="845" y="270" font-weight="bold" fill="#c62828">PCI subnets (NACL-isolated)</text>
+  <rect x="850" y="285" width="290" height="95" rx="5" fill="#fff" stroke="#c62828"/>
+  <text x="995" y="305" text-anchor="middle" font-weight="bold">Node group "pci" (tainted)</text>
+  <text x="995" y="325" text-anchor="middle">payment service only</text>
+  <text x="995" y="343" text-anchor="middle" font-size="11" fill="#555">8443 mTLS from app tier only</text>
+  <text x="995" y="360" text-anchor="middle" font-size="11" fill="#555">own SG · own IRSA role · ns "payments"</text>
+
+  <!-- Data -->
+  <rect x="270" y="430" width="540" height="120" rx="8" fill="#ede7f6" stroke="#5e35b1"/>
+  <text x="285" y="450" font-weight="bold" fill="#5e35b1">Private data subnets – no route to internet</text>
+  <rect x="300" y="465" width="480" height="65" rx="5" fill="#fff" stroke="#5e35b1"/>
+  <text x="540" y="490" text-anchor="middle" font-weight="bold">RDS MySQL 8.0 Multi-AZ</text>
+  <text x="540" y="510" text-anchor="middle" font-size="11" fill="#555">KMS at rest · TLS enforced · SG: 3306 from app + pci node SGs only · not public</text>
+
+  <!-- Managed services -->
+  <rect x="830" y="430" width="330" height="120" rx="8" fill="#eceff1" stroke="#546e7a"/>
+  <text x="845" y="450" font-weight="bold" fill="#37474f">Managed services (regional)</text>
+  <text x="850" y="473">S3 assets + reports (SSE-KMS)</text>
+  <text x="1075" y="473" font-size="11" fill="#e65100">② DataSync</text>
+  <text x="850" y="495">Secrets Manager + KMS (per-service secrets)</text>
+  <text x="850" y="515">ECR (immutable tags, scan on push)</text>
+  <text x="850" y="535">CloudWatch · GuardDuty · Flow Logs</text>
+
+  <!-- CI/CD -->
+  <rect x="270" y="580" width="890" height="105" rx="8" fill="#fff" stroke="#999" stroke-dasharray="6 4"/>
+  <text x="285" y="600" font-weight="bold">CI/CD – GitHub Actions (OIDC roles, no static keys)</text>
+  <text x="300" y="630">test + lint → build → Trivy/gitleaks/hadolint → push ECR →</text>
+  <text x="300" y="650">deploy dev (auto) → staging (auto) → prod (manual approval) → Helm --atomic, smoke test, auto-rollback</text>
+  <text x="300" y="670" fill="#555" font-size="11">Terraform: fmt/validate/tflint/checkov → plan (artifact) → approved apply; state in S3 + DynamoDB lock, per environment</text>
+
+  <!-- Arrows -->
+  <defs><marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#333"/></marker></defs>
+  <g stroke="#333" stroke-width="1.6" fill="none" marker-end="url(#a)">
+    <path d="M445,76 L375,165"/>
+    <path d="M450,200 L640,285"/>
+    <path d="M790,332 L850,332" stroke="#c62828"/>
+    <path d="M670,380 L670,465"/>
+    <path d="M410,380 L410,465"/>
+    <path d="M995,380 L995,415 L815,415 L815,497 L782,497" stroke="#5e35b1"/>
+    <path d="M575,210 L575,250" stroke-dasharray="4 3"/>
+    <path d="M650,187 L700,187" stroke-dasharray="4 3"/>
+  </g>
+  <text x="792" y="324" font-size="10" fill="#c62828">8443</text>
+  <text x="792" y="350" font-size="10" fill="#c62828">mTLS</text>
+  <text x="678" y="425" font-size="11">3306 TLS</text>
+  <text x="418" y="425" font-size="11">3306 TLS</text>
+  <text x="515" y="240" font-size="11">8080</text>
+
+  <!-- Migration paths -->
+  <g stroke="#e65100" stroke-width="2" fill="none" stroke-dasharray="7 4" marker-end="url(#a)">
+    <path d="M210,190 L230,190 L230,497 L300,497"/>
+  </g>
+  <text x="62" y="410" font-size="12" fill="#e65100" font-weight="bold">Migration paths</text>
+  <text x="40" y="428" font-size="11" fill="#e65100">① DMS full load + CDC → RDS (VPN)</text>
+  <text x="40" y="446" font-size="11" fill="#e65100">② DataSync NFS → S3</text>
+  <text x="40" y="464" font-size="11" fill="#e65100">③ Reverse DMS task = rollback path</text>
+  <text x="40" y="482" font-size="11" fill="#e65100">④ Secrets → Secrets Manager</text>
+
+  <!-- legend -->
+  <text x="20" y="760" font-weight="bold">Legend</text>
+  <rect x="20" y="770" width="14" height="14" fill="#e8f5e9" stroke="#2e7d32"/><text x="40" y="782">public</text>
+  <rect x="100" y="770" width="14" height="14" fill="#fff8e1" stroke="#f9a825"/><text x="120" y="782">app</text>
+  <rect x="170" y="770" width="14" height="14" fill="#fdecea" stroke="#c62828"/><text x="190" y="782">PCI</text>
+  <rect x="240" y="770" width="14" height="14" fill="#ede7f6" stroke="#5e35b1"/><text x="260" y="782">data</text>
+</svg>

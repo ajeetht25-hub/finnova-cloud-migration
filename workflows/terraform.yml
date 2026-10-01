@@ -1,0 +1,94 @@
+name: terraform
+
+on:
+  pull_request:
+    paths: ["terraform/**"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev, staging, prod]
+        required: true
+      action:
+        type: choice
+        options: [plan, apply]
+        default: plan
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+      - run: terraform fmt -check -recursive terraform
+      - name: validate stack
+        working-directory: terraform/stack
+        run: |
+          terraform init -backend=false
+          terraform validate
+      - uses: terraform-linters/setup-tflint@v4
+      - run: tflint --recursive --chdir terraform
+      - name: Checkov (IaC security)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          framework: terraform
+          soft_fail: false
+
+  plan:
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: ${{ github.event_name == 'pull_request' && fromJSON('["dev","staging","prod"]') || fromJSON(format('["{0}"]', inputs.environment)) }}
+    environment: ${{ matrix.environment }}-plan
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_TF_PLAN }} # read-only role
+          aws-region: ap-south-1
+      - name: plan
+        working-directory: terraform/stack
+        run: |
+          terraform init -backend-config=envs/${{ matrix.environment }}.backend.hcl
+          terraform plan -input=false -lock-timeout=5m \
+            -var-file=envs/${{ matrix.environment }}.tfvars -out=tfplan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: terraform/stack/tfplan
+
+  apply:
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'apply'
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }} # required reviewers on staging/prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_TF_APPLY }}
+          aws-region: ap-south-1
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: terraform/stack
+      - name: apply the reviewed plan
+        working-directory: terraform/stack
+        run: |
+          terraform init -backend-config=envs/${{ inputs.environment }}.backend.hcl
+          terraform apply -input=false -lock-timeout=5m tfplan

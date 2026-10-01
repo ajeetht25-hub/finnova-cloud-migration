@@ -1,0 +1,183 @@
+name: inventory-service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "services/inventory/**"
+      - "deploy/helm/inventory/**"
+      - ".github/workflows/inventory-service.yml"
+  pull_request:
+    paths:
+      - "services/inventory/**"
+      - "deploy/helm/inventory/**"
+  workflow_dispatch:
+    inputs:
+      rollback_environment:
+        description: "Roll back this environment to its previous Helm revision (leave empty for a normal run)"
+        required: false
+        type: choice
+        options: ["", dev, staging, prod]
+
+permissions:
+  id-token: write # OIDC to AWS: no long-lived AWS keys stored in GitHub
+  contents: read
+  security-events: write
+
+concurrency:
+  group: inventory-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  SERVICE: inventory
+  ECR_REPO: finnova/inventory
+  CHART_DIR: deploy/helm/inventory
+
+jobs:
+  # ---------------------------------------------------------------- 1. test + lint
+  test:
+    if: ${{ inputs.rollback_environment == '' || inputs.rollback_environment == null }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/inventory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: services/inventory/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - name: Dockerfile lint (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/inventory/Dockerfile
+          failure-threshold: warning
+      - name: Helm lint + template
+        run: |
+          helm lint ${{ github.workspace }}/${{ env.CHART_DIR }} -f ${{ github.workspace }}/${{ env.CHART_DIR }}/values-prod.yaml
+          helm template inv ${{ github.workspace }}/${{ env.CHART_DIR }} -f ${{ github.workspace }}/${{ env.CHART_DIR }}/values-prod.yaml \
+            --set image.repository=x --set image.tag=y > /dev/null
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------- 2. build + scan + push
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+      image_uri: ${{ steps.meta.outputs.uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_BUILD }} # least privilege: ECR push only
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - id: meta
+        run: |
+          TAG="${GITHUB_SHA::12}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "uri=${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build locally first (load), scan, and only push if the scan is clean.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: services/inventory
+          load: true
+          push: false
+          tags: ${{ steps.meta.outputs.uri }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy vulnerability + secret scan (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.meta.outputs.uri }}
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: sarif
+          output: trivy.sarif
+
+      - name: Upload scan results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+
+      - name: Trivy IaC/Helm misconfiguration scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: ${{ env.CHART_DIR }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Push image (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: docker push "${{ steps.meta.outputs.uri }}"
+
+  # ---------------------------------------------------------------- 3. deploy dev (auto)
+  deploy-dev:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: dev
+      image_tag: ${{ needs.build.outputs.image_tag }}
+    secrets: inherit
+
+  # ---------------------------------------------------------------- 4. deploy staging (auto after dev)
+  deploy-staging:
+    needs: [build, deploy-dev]
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: staging
+      image_tag: ${{ needs.build.outputs.image_tag }}
+    secrets: inherit
+
+  # ---------------------------------------------------------------- 5. deploy prod (manual approval)
+  # The "prod" GitHub Environment has Required reviewers configured, so the job
+  # pauses here until an approver clicks "Approve".
+  deploy-prod:
+    needs: [build, deploy-staging]
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: prod
+      image_tag: ${{ needs.build.outputs.image_tag }}
+    secrets: inherit
+
+  # ---------------------------------------------------------------- manual rollback
+  rollback:
+    if: ${{ inputs.rollback_environment != '' && inputs.rollback_environment != null }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.rollback_environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN_DEPLOY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER }}" --region "$AWS_REGION"
+      - name: Helm rollback to previous revision
+        run: |
+          helm history inventory -n orders
+          helm rollback inventory -n orders --wait --timeout 5m
+          kubectl -n orders rollout status deploy/inventory --timeout=300s
