@@ -105,9 +105,10 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy vulnerability + secret scan (fail on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (pinned by commit SHA)
         with:
           image-ref: ${{ steps.meta.outputs.uri }}
+          version: v0.69.3
           scanners: vuln,secret
           severity: HIGH,CRITICAL
           ignore-unfixed: true
@@ -122,8 +123,9 @@ jobs:
           sarif_file: trivy.sarif
 
       - name: Trivy IaC/Helm misconfiguration scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (pinned by commit SHA)
         with:
+          version: v0.69.3
           scan-type: config
           scan-ref: ${{ env.CHART_DIR }}
           severity: HIGH,CRITICAL
